@@ -1,4 +1,4 @@
-# SportLog — stack scaffold
+# SportLog
 
 A Letterboxd/Beli-for-sports app: log games you've watched, rate them by
 **relative ranking** (not stars), follow friends, and get spoiler-free
