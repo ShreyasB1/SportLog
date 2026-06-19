@@ -1,6 +1,7 @@
 import { useAuth } from '@clerk/clerk-expo'
-import { Redirect, Tabs } from 'expo-router'
-import { Text } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
+import { Redirect, Tabs, router } from 'expo-router'
+import { TouchableOpacity, View } from 'react-native'
 
 export default function TabsLayout() {
   const { isSignedIn, isLoaded } = useAuth()
@@ -18,10 +19,10 @@ export default function TabsLayout() {
           borderTopWidth: 1,
           height: 82,
           paddingBottom: 22,
-          paddingTop: 8,
+          paddingTop: 10,
         },
         tabBarActiveTintColor: '#e94560',
-        tabBarInactiveTintColor: '#444',
+        tabBarInactiveTintColor: '#3a3a5a',
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '600',
@@ -32,22 +33,72 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Logbook',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>📋</Text>,
+          title: 'Explore',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'search' : 'search-outline'} size={22} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="rank"
         options={{
           title: 'Rankings',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>🏆</Text>,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'trophy' : 'trophy-outline'} size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="log"
+        options={{
+          title: '',
+          tabBarIcon: () => (
+            <View
+              style={{
+                width: 50,
+                height: 50,
+                borderRadius: 25,
+                backgroundColor: '#e94560',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 18,
+                shadowColor: '#e94560',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.5,
+                shadowRadius: 8,
+                elevation: 8,
+              }}
+            >
+              <Ionicons name="add" size={30} color="#fff" />
+            </View>
+          ),
+          tabBarButton: props => (
+            <TouchableOpacity
+              style={props.style as any}
+              onPress={() => router.push('/log-game')}
+              activeOpacity={0.75}
+            >
+              {props.children}
+            </TouchableOpacity>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="logbook"
+        options={{
+          title: 'Logbook',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'journal' : 'journal-outline'} size={22} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>👤</Text>,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'person' : 'person-outline'} size={22} color={color} />
+          ),
         }}
       />
     </Tabs>

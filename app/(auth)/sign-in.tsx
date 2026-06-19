@@ -2,7 +2,6 @@ import { useSignIn } from '@clerk/clerk-expo'
 import { useRouter } from 'expo-router'
 import { useState } from 'react'
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -18,10 +17,12 @@ export default function SignIn() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   const onSignIn = async () => {
     if (!isLoaded) return
     setLoading(true)
+    setError('')
     try {
       const result = await signIn.create({ identifier: email, password })
       if (result.status === 'complete') {
@@ -29,7 +30,7 @@ export default function SignIn() {
         router.replace('/(tabs)/')
       }
     } catch (err: any) {
-      Alert.alert('Sign in failed', err.errors?.[0]?.message ?? err.message)
+      setError(err.errors?.[0]?.message ?? err.message ?? 'Sign in failed')
     } finally {
       setLoading(false)
     }
@@ -64,6 +65,8 @@ export default function SignIn() {
           returnKeyType="done"
           onSubmitEditing={onSignIn}
         />
+
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
@@ -117,6 +120,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#1e1e3a',
+  },
+  errorText: {
+    color: '#e94560',
+    fontSize: 14,
+    textAlign: 'center',
+    width: '100%',
   },
   button: {
     width: '100%',
