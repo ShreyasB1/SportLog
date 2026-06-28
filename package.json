@@ -12,7 +12,6 @@
     "@clerk/clerk-expo": "^2.7.0",
     "@expo/metro-runtime": "~4.0.0",
     "@opentelemetry/api": "^1.9.1",
-    "@sentry/react-native": "~6.10.0",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.108.2",
     "expo": "~52.0.0",

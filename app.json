@@ -22,15 +22,7 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store",
-      [
-        "@sentry/react-native/expo",
-        {
-          "url": "https://sentry.io/",
-          "organization": "your-sentry-org",
-          "project": "sportlog"
-        }
-      ]
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true
