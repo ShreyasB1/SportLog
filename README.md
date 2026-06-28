@@ -1,6 +1,6 @@
 # SportLog
 
-A Letterboxd/Beli-for-sports app: log games you've watched, rank them against each other with pairwise comparisons, follow friends, and get spoiler-free "should I watch this?" recommendations.
+A sports ranking app: log games you've watched, rank them against each other with pairwise comparisons, follow friends, and get spoiler-free "should I watch this?" recommendations.
 
 ## Features
 

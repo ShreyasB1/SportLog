@@ -2,7 +2,6 @@ import { useSignUp } from '@clerk/clerk-expo'
 import { useRouter } from 'expo-router'
 import { useState } from 'react'
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -19,16 +18,18 @@ export default function SignUp() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   const onSignUp = async () => {
     if (!isLoaded) return
     setLoading(true)
+    setError('')
     try {
       await signUp.create({ username, emailAddress: email, password })
       await signUp.prepareEmailAddressVerification({ strategy: 'email_code' })
       router.push('/(auth)/verify-email')
     } catch (err: any) {
-      Alert.alert('Sign up failed', err.errors?.[0]?.message ?? err.message)
+      setError(err.errors?.[0]?.message ?? err.message ?? 'Sign up failed')
     } finally {
       setLoading(false)
     }
@@ -76,6 +77,8 @@ export default function SignUp() {
           returnKeyType="done"
           onSubmitEditing={onSignUp}
         />
+
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
@@ -131,6 +134,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#1e1e3a',
+  },
+  errorText: {
+    color: '#e94560',
+    fontSize: 14,
+    textAlign: 'center',
+    width: '100%',
   },
   button: {
     width: '100%',

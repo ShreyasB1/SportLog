@@ -37,5 +37,15 @@ export interface Profile {
   username: string
   display_name: string | null
   avatar_url: string | null
+  favorite_team: string | null
+  bio: string | null
   created_at: string
+}
+
+export interface Watchlist {
+  id: string
+  user_id: string
+  game_id: string
+  created_at: string
+  game: Game
 }
