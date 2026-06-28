@@ -3,6 +3,10 @@ export interface Game {
   league: string
   home_team: string
   away_team: string
+  home_logo?: string
+  away_logo?: string
+  home_abbr?: string
+  away_abbr?: string
   starts_at: string
   status: string
   home_score: number | null

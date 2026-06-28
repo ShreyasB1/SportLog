@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -248,9 +249,23 @@ function GameCard({
       </View>
 
       <View style={styles.matchupRow}>
-        <Text style={styles.teamName}>{game.home_team}</Text>
+        <View style={styles.teamCol}>
+          {game.home_logo ? (
+            <Image source={{ uri: game.home_logo }} style={styles.teamLogo} resizeMode="contain" />
+          ) : (
+            <View style={styles.teamLogoPlaceholder} />
+          )}
+          <Text style={styles.teamName}>{game.home_abbr ?? game.home_team}</Text>
+        </View>
         <Text style={styles.vsText}>vs</Text>
-        <Text style={styles.teamName}>{game.away_team}</Text>
+        <View style={styles.teamCol}>
+          {game.away_logo ? (
+            <Image source={{ uri: game.away_logo }} style={styles.teamLogo} resizeMode="contain" />
+          ) : (
+            <View style={styles.teamLogoPlaceholder} />
+          )}
+          <Text style={styles.teamName}>{game.away_abbr ?? game.away_team}</Text>
+        </View>
       </View>
 
       <View style={styles.cardActions}>
@@ -404,17 +419,31 @@ const styles = StyleSheet.create({
   matchupRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  teamCol: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 6,
+  },
+  teamLogo: {
+    width: 44,
+    height: 44,
+  },
+  teamLogoPlaceholder: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#1e1e38',
   },
   teamName: {
-    flex: 1,
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '700',
     color: '#fff',
     textAlign: 'center',
   },
-  vsText: { fontSize: 12, color: '#333', fontWeight: '600' },
+  vsText: { fontSize: 12, color: '#333', fontWeight: '600', marginTop: 10 },
   cardActions: {
     flexDirection: 'row',
     gap: 8,
