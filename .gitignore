@@ -4,9 +4,13 @@ dist/
 web-build/
 
 # env
+.env
 .env.local
 .env*.local
 sentry.properties
+
+# supabase local state
+supabase/.temp/
 
 # native
 *.jks
