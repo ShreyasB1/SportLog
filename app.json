@@ -5,24 +5,43 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "sportlog",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
+    "backgroundColor": "#0a0a0f",
     "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0f"
+    },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.sportlog.app"
+      "bundleIdentifier": "com.sportlog.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0a0a0f"
       },
-      "package": "com.sportlog.app"
+      "package": "com.sportlog.app",
+      "versionCode": 1
     },
     "web": {
       "bundler": "metro"
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SportLog uses your photo library so you can choose a profile picture."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

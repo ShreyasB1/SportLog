@@ -1,30 +1,40 @@
-import { useAuth, useUser } from '@clerk/clerk-expo'
 import { router } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import {
+  Alert,
   FlatList,
   Image,
   Modal,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native'
+import * as ImagePicker from 'expo-image-picker'
+import { Ionicons } from '@expo/vector-icons'
+import { useUser } from '../../lib/useSession'
 import { useSupabase } from '../../lib/useSupabase'
+import { computePickRecord } from '../../lib/points'
 import type { Log, Profile } from '../../lib/types'
 
 export default function ProfileScreen() {
   const supabase = useSupabase()
-  const { user } = useUser()
-  const { signOut } = useAuth()
+  const user = useUser()
 
   const [profile, setProfile] = useState<Profile | null>(null)
   const [followersCount, setFollowersCount] = useState(0)
   const [followingCount, setFollowingCount] = useState(0)
   const [gamesWatched, setGamesWatched] = useState(0)
   const [watchlistCount, setWatchlistCount] = useState(0)
+  const [picksTotal, setPicksTotal] = useState(0)
+  const [pickWins, setPickWins] = useState(0)
+  const [pickLosses, setPickLosses] = useState(0)
+  const [pickPoints, setPickPoints] = useState(0)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [topLeagues, setTopLeagues] = useState<{ league: string; count: number }[]>([])
   const [recentLogs, setRecentLogs] = useState<Log[]>([])
   const [suggested, setSuggested] = useState<Profile[]>([])
   const [following, setFollowing] = useState<Set<string>>(new Set())
@@ -50,13 +60,15 @@ export default function ProfileScreen() {
       .single()
 
     if (!profileData) {
+      // Fallback for accounts created before the handle_new_user trigger.
+      const metaUsername = (user.user_metadata?.username as string | undefined) ?? null
       const { data: created } = await supabase
         .from('profiles')
         .insert({
           id: userId,
-          username: user.username ?? `user${userId.slice(-6)}`,
-          display_name: user.fullName ?? user.username ?? null,
-          avatar_url: user.imageUrl ?? null,
+          username: metaUsername ?? `user${userId.replace(/-/g, '').slice(-8)}`,
+          display_name: metaUsername,
+          avatar_url: null,
         })
         .select()
         .single()
@@ -73,6 +85,8 @@ export default function ProfileScreen() {
       followingRes,
       suggestedRes,
       followingListRes,
+      picksRes,
+      leaguesRes,
     ] = await Promise.all([
       supabase
         .from('logs')
@@ -107,6 +121,14 @@ export default function ProfileScreen() {
         .from('friendships')
         .select('addressee_id')
         .eq('requester_id', userId),
+      supabase
+        .from('picks')
+        .select('picked_team, game:games(home_team, away_team, home_score, away_score, status)')
+        .eq('user_id', userId),
+      supabase
+        .from('logs')
+        .select('game:games(league)')
+        .eq('user_id', userId),
     ])
 
     setGamesWatched(logsCountRes.count ?? 0)
@@ -120,6 +142,26 @@ export default function ProfileScreen() {
       ((followingListRes.data ?? []) as any[]).map(f => f.addressee_id)
     )
     setFollowing(followingIds)
+
+    // Pick record: grade finished games client-side
+    const record = computePickRecord((picksRes.data ?? []) as any[])
+    setPicksTotal(record.total)
+    setPickWins(record.wins)
+    setPickLosses(record.losses)
+    setPickPoints(record.points)
+
+    // Most-logged leagues
+    const leagueCounts = new Map<string, number>()
+    for (const row of (leaguesRes.data ?? []) as any[]) {
+      const lg = row.game?.league
+      if (lg) leagueCounts.set(lg, (leagueCounts.get(lg) ?? 0) + 1)
+    }
+    setTopLeagues(
+      [...leagueCounts.entries()]
+        .map(([league, count]) => ({ league, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3)
+    )
     setLoading(false)
   }, [supabase, user])
 
@@ -151,20 +193,83 @@ export default function ProfileScreen() {
   }
 
   const followUser = async (addresseeId: string) => {
-    await supabase.from('friendships').insert({ addressee_id: addresseeId })
+    // One-way follow model: no accept step, so rows go in as accepted
+    await supabase.from('friendships').insert({ addressee_id: addresseeId, status: 'accepted' })
     setFollowing(prev => new Set(prev).add(addresseeId))
     setFollowingCount(c => c + 1)
   }
 
+  const changeAvatar = async () => {
+    if (!user) return
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
+    if (!perm.granted) {
+      Alert.alert('Permission needed', 'Allow photo access in Settings to change your profile picture.')
+      return
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    })
+    if (result.canceled || !result.assets[0]) return
+
+    setAvatarUploading(true)
+    try {
+      const uri = result.assets[0].uri
+      const arraybuffer = await fetch(uri).then(r => r.arrayBuffer())
+      // Timestamped path so the public URL changes and caches don't serve the old photo
+      const path = `${user.id}/avatar-${Date.now()}.jpg`
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(path, arraybuffer, { contentType: 'image/jpeg', upsert: true })
+      if (uploadError) throw uploadError
+      const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path)
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: pub.publicUrl })
+        .eq('id', user.id)
+      if (updateError) throw updateError
+      setProfile(p => (p ? { ...p, avatar_url: pub.publicUrl } : p))
+    } catch {
+      Alert.alert('Upload failed', 'Could not update your profile picture. Please try again.')
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
   const handleSignOut = async () => {
-    await signOut()
+    await supabase.auth.signOut()
     router.replace('/(auth)/sign-in')
   }
 
-  const displayName =
-    profile?.display_name ?? user?.fullName ?? profile?.username ?? '—'
-  const username = profile?.username ?? user?.username ?? ''
-  const avatarUrl = user?.imageUrl ?? profile?.avatar_url ?? null
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete account?',
+      'This permanently deletes your account, logs, rankings, and picks. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase.functions.invoke('delete-account')
+            if (error) {
+              Alert.alert('Error', 'Could not delete your account. Please try again.')
+              return
+            }
+            await supabase.auth.signOut()
+            router.replace('/(auth)/sign-in')
+          },
+        },
+      ],
+    )
+  }
+
+  const metaUsername = (user?.user_metadata?.username as string | undefined) ?? ''
+  const displayName = profile?.display_name || profile?.username || metaUsername || '—'
+  const username = profile?.username ?? metaUsername
+  const avatarUrl = profile?.avatar_url ?? null
   const initials = (displayName[0] ?? '?').toUpperCase()
   const joinedDate = profile
     ? new Date(profile.created_at).toLocaleDateString('en-US', {
@@ -186,20 +291,50 @@ export default function ProfileScreen() {
               <TouchableOpacity style={styles.topBtn} onPress={openEdit}>
                 <Text style={styles.topBtnText}>Edit Profile</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.topBtn} onPress={() => {}}>
-                <Text style={styles.topBtnText}>Share</Text>
-              </TouchableOpacity>
+              <View style={styles.topRowRight}>
+                <TouchableOpacity
+                  style={styles.topIconBtn}
+                  onPress={() => router.push('/search-users')}
+                >
+                  <Ionicons name="search" size={17} color="#aaa" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.topIconBtn}
+                  onPress={() => router.push('/leaderboard')}
+                >
+                  <Ionicons name="trophy-outline" size={17} color="#aaa" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.topBtn}
+                  onPress={() =>
+                    Share.share({
+                      message: `I've logged ${gamesWatched} game${gamesWatched !== 1 ? 's' : ''} on SportLog${username ? ` — follow me @${username}` : ''}!`,
+                    })
+                  }
+                >
+                  <Text style={styles.topBtnText}>Share</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* ── Avatar + identity ── */}
             <View style={styles.identity}>
-              {avatarUrl ? (
-                <Image source={{ uri: avatarUrl }} style={styles.avatar} />
-              ) : (
-                <View style={styles.avatarFallback}>
-                  <Text style={styles.avatarInitials}>{initials}</Text>
+              <TouchableOpacity onPress={changeAvatar} activeOpacity={0.8} disabled={avatarUploading}>
+                {avatarUrl ? (
+                  <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+                ) : (
+                  <View style={styles.avatarFallback}>
+                    <Text style={styles.avatarInitials}>{initials}</Text>
+                  </View>
+                )}
+                <View style={styles.avatarEditBadge}>
+                  <Ionicons
+                    name={avatarUploading ? 'hourglass-outline' : 'camera'}
+                    size={13}
+                    color="#fff"
+                  />
                 </View>
-              )}
+              </TouchableOpacity>
               <Text style={styles.displayName}>{displayName}</Text>
               {username ? <Text style={styles.username}>@{username}</Text> : null}
               {joinedDate ? (
@@ -209,15 +344,21 @@ export default function ProfileScreen() {
 
             {/* ── Follow counts ── */}
             <View style={styles.followRow}>
-              <View style={styles.followStat}>
+              <TouchableOpacity
+                style={styles.followStat}
+                onPress={() => router.push({ pathname: '/follows', params: { tab: 'followers' } })}
+              >
                 <Text style={styles.followNum}>{followersCount}</Text>
                 <Text style={styles.followLabel}>Followers</Text>
-              </View>
+              </TouchableOpacity>
               <View style={styles.followDivider} />
-              <View style={styles.followStat}>
+              <TouchableOpacity
+                style={styles.followStat}
+                onPress={() => router.push({ pathname: '/follows', params: { tab: 'following' } })}
+              >
                 <Text style={styles.followNum}>{followingCount}</Text>
                 <Text style={styles.followLabel}>Following</Text>
-              </View>
+              </TouchableOpacity>
             </View>
 
             {/* ── Favorite team ── */}
@@ -233,17 +374,70 @@ export default function ProfileScreen() {
               <Text style={styles.bio}>{profile.bio}</Text>
             ) : null}
 
-            {/* ── Stats ── */}
+            {/* ── Stats (each opens its screen) ── */}
             <View style={styles.statsRow}>
-              <View style={styles.statBox}>
+              <TouchableOpacity
+                style={styles.statBox}
+                onPress={() => router.push({ pathname: '/(tabs)/logbook', params: { tab: 'diary' } })}
+              >
                 <Text style={styles.statNum}>{gamesWatched}</Text>
                 <Text style={styles.statLabel}>Watched</Text>
-              </View>
-              <View style={styles.statBox}>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.statBox}
+                onPress={() => router.push('/watchlist')}
+              >
                 <Text style={styles.statNum}>{watchlistCount}</Text>
                 <Text style={styles.statLabel}>Watchlist</Text>
-              </View>
+              </TouchableOpacity>
             </View>
+            <View style={styles.statsRow}>
+              <TouchableOpacity
+                style={styles.statBox}
+                onPress={() => router.push({ pathname: '/(tabs)/logbook', params: { tab: 'picks' } })}
+              >
+                <Text style={styles.statNum}>{picksTotal}</Text>
+                <Text style={styles.statLabel}>Picks</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.statBox}
+                onPress={() => router.push('/leaderboard')}
+              >
+                <Text style={styles.statNum}>{pickPoints}</Text>
+                <Text style={styles.statLabel}>
+                  {pickWins + pickLosses > 0
+                    ? `Points (${pickWins}–${pickLosses})`
+                    : 'Points'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* ── Friends leaderboard ── */}
+            <TouchableOpacity
+              style={styles.leaderboardBtn}
+              onPress={() => router.push('/leaderboard')}
+            >
+              <Ionicons name="trophy" size={16} color="#e94560" />
+              <Text style={styles.leaderboardBtnText}>Friends Leaderboard</Text>
+              <Ionicons name="chevron-forward" size={16} color="#555" />
+            </TouchableOpacity>
+
+            {/* ── Top leagues ── */}
+            {topLeagues.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Top Leagues</Text>
+                <View style={styles.leagueChipsRow}>
+                  {topLeagues.map(l => (
+                    <View key={l.league} style={styles.leagueChip}>
+                      <Text style={styles.leagueChipName}>{l.league}</Text>
+                      <Text style={styles.leagueChipCount}>
+                        {l.count} game{l.count !== 1 ? 's' : ''}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
 
             {/* ── Suggested for You ── */}
             {suggested.length > 0 && (
@@ -258,7 +452,12 @@ export default function ProfileScreen() {
                     const isFollowing = following.has(p.id)
                     const pInitials = (p.display_name ?? p.username ?? '?')[0].toUpperCase()
                     return (
-                      <View key={p.id} style={styles.suggestedCard}>
+                      <TouchableOpacity
+                        key={p.id}
+                        style={styles.suggestedCard}
+                        activeOpacity={0.8}
+                        onPress={() => router.push({ pathname: '/user/[id]', params: { id: p.id } })}
+                      >
                         {p.avatar_url ? (
                           <Image source={{ uri: p.avatar_url }} style={styles.suggestedAvatar} />
                         ) : (
@@ -289,7 +488,7 @@ export default function ProfileScreen() {
                             {isFollowing ? 'Following' : 'Follow'}
                           </Text>
                         </TouchableOpacity>
-                      </View>
+                      </TouchableOpacity>
                     )
                   })}
                 </ScrollView>
@@ -334,9 +533,14 @@ export default function ProfileScreen() {
           )
         }}
         ListFooterComponent={
-          <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
-            <Text style={styles.signOutText}>Sign Out</Text>
-          </TouchableOpacity>
+          <View>
+            <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
+              <Text style={styles.signOutText}>Sign Out</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteAccount}>
+              <Text style={styles.deleteText}>Delete Account</Text>
+            </TouchableOpacity>
+          </View>
         }
       />
 
@@ -413,6 +617,43 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   topBtnText: { color: '#aaa', fontSize: 13, fontWeight: '600' },
+  topRowRight: { flexDirection: 'row', gap: 8 },
+  topIconBtn: {
+    borderWidth: 1,
+    borderColor: '#1e1e38',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarEditBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: 6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#1e1e38',
+    borderWidth: 2,
+    borderColor: '#0a0a0f',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  leaderboardBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: '#111120',
+    borderWidth: 1,
+    borderColor: '#1e1e38',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+  },
+  leaderboardBtnText: { flex: 1, color: '#fff', fontSize: 14, fontWeight: '700' },
   identity: { alignItems: 'center', paddingVertical: 20, gap: 4 },
   avatar: {
     width: 90,
@@ -483,7 +724,20 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   statNum: { fontSize: 28, fontWeight: '800', color: '#fff' },
-  statLabel: { fontSize: 12, color: '#555', fontWeight: '600' },
+  statLabel: { fontSize: 12, color: '#555', fontWeight: '600', textAlign: 'center' },
+  leagueChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16 },
+  leagueChip: {
+    backgroundColor: '#111120',
+    borderWidth: 1,
+    borderColor: '#1e1e38',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
+    gap: 2,
+  },
+  leagueChipName: { fontSize: 13, fontWeight: '800', color: '#fff' },
+  leagueChipCount: { fontSize: 11, color: '#555', fontWeight: '600' },
   section: { paddingTop: 20, paddingBottom: 4 },
   sectionTitle: {
     fontSize: 18,
@@ -556,6 +810,13 @@ const styles = StyleSheet.create({
     borderColor: '#1e1e38',
   },
   signOutText: { color: '#e94560', fontSize: 16, fontWeight: '700' },
+  deleteBtn: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  deleteText: { color: '#555', fontSize: 14, fontWeight: '600' },
   modalContainer: { flex: 1, backgroundColor: '#0a0a0f' },
   modalHeader: {
     flexDirection: 'row',
