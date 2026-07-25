@@ -1,29 +1,7 @@
-import { useAuth } from '@clerk/clerk-expo'
-import { createClient } from '@supabase/supabase-js'
-import { useEffect, useMemo, useRef } from 'react'
+import { supabase } from './supabase'
 
+// Kept as a hook for API compatibility with existing screens; the client is
+// a stable singleton so it never causes re-renders or effect re-runs.
 export function useSupabase() {
-  const { getToken } = useAuth()
-  const getTokenRef = useRef(getToken)
-
-  useEffect(() => {
-    getTokenRef.current = getToken
-  })
-
-  return useMemo(
-    () =>
-      createClient(
-        process.env.EXPO_PUBLIC_SUPABASE_URL!,
-        process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-            detectSessionInUrl: false,
-          },
-          accessToken: async () => (await getTokenRef.current()) ?? null,
-        },
-      ),
-    [],
-  )
+  return supabase
 }

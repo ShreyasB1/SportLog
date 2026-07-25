@@ -1,5 +1,4 @@
-import { useSignUp } from '@clerk/clerk-expo'
-import { useRouter } from 'expo-router'
+import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useState } from 'react'
 import {
   Alert,
@@ -9,36 +8,39 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native'
+import { supabase } from '../../lib/supabase'
 
 export default function VerifyEmail() {
-  const { signUp, setActive, isLoaded } = useSignUp()
   const router = useRouter()
+  const { email } = useLocalSearchParams<{ email: string }>()
   const [code, setCode] = useState('')
   const [loading, setLoading] = useState(false)
 
   const onVerify = async () => {
-    if (!isLoaded) return
+    if (!email) return
     setLoading(true)
-    try {
-      const result = await signUp.attemptEmailAddressVerification({ code })
-      if (result.status === 'complete') {
-        await setActive({ session: result.createdSessionId })
-        router.replace('/(tabs)/')
-      }
-    } catch (err: any) {
-      Alert.alert('Verification failed', err.errors?.[0]?.message ?? err.message)
-    } finally {
-      setLoading(false)
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token: code,
+      type: 'signup',
+    })
+    setLoading(false)
+    if (error) {
+      Alert.alert('Verification failed', error.message)
+      return
     }
+    // verifyOtp establishes a session; (auth)/_layout redirects, but replace
+    // explicitly so back navigation doesn't return here.
+    router.replace('/(tabs)')
   }
 
   const onResend = async () => {
-    if (!isLoaded) return
-    try {
-      await signUp.prepareEmailAddressVerification({ strategy: 'email_code' })
+    if (!email) return
+    const { error } = await supabase.auth.resend({ type: 'signup', email })
+    if (error) {
+      Alert.alert('Error', error.message)
+    } else {
       Alert.alert('Code resent', 'Check your email for a new code.')
-    } catch (err: any) {
-      Alert.alert('Error', err.errors?.[0]?.message ?? err.message)
     }
   }
 
@@ -46,7 +48,7 @@ export default function VerifyEmail() {
     <View style={styles.container}>
       <Text style={styles.title}>Check your email</Text>
       <Text style={styles.subtitle}>
-        We sent a 6-digit code to verify your account.
+        We sent a 6-digit code to {email ?? 'your email'}.
       </Text>
 
       <TextInput

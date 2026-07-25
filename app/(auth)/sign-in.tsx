@@ -1,4 +1,3 @@
-import { useSignIn } from '@clerk/clerk-expo'
 import { useRouter } from 'expo-router'
 import { useState } from 'react'
 import {
@@ -10,9 +9,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native'
+import { supabase } from '../../lib/supabase'
 
 export default function SignIn() {
-  const { signIn, setActive, isLoaded } = useSignIn()
   const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -20,20 +19,21 @@ export default function SignIn() {
   const [error, setError] = useState('')
 
   const onSignIn = async () => {
-    if (!isLoaded) return
     setLoading(true)
     setError('')
-    try {
-      const result = await signIn.create({ identifier: email, password })
-      if (result.status === 'complete') {
-        await setActive({ session: result.createdSessionId })
-        router.replace('/(tabs)/')
-      }
-    } catch (err: any) {
-      setError(err.errors?.[0]?.message ?? err.message ?? 'Sign in failed')
-    } finally {
-      setLoading(false)
+    const { error: err } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    })
+    if (err) {
+      setError(
+        err.message === 'Email not confirmed'
+          ? 'Please verify your email first — check your inbox for the code.'
+          : err.message || 'Sign in failed',
+      )
     }
+    // On success the session listener redirects via (auth)/_layout.
+    setLoading(false)
   }
 
   return (
@@ -65,9 +65,7 @@ export default function SignIn() {
           returnKeyType="done"
           onSubmitEditing={onSignIn}
         />
-
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}
           onPress={onSignIn}
@@ -75,7 +73,9 @@ export default function SignIn() {
         >
           <Text style={styles.buttonText}>{loading ? 'Signing in…' : 'Sign In'}</Text>
         </TouchableOpacity>
-
+        <TouchableOpacity onPress={() => router.push('/(auth)/forgot-password')}>
+          <Text style={styles.link}>Forgot password?</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => router.push('/(auth)/sign-up')}>
           <Text style={styles.link}>
             Don't have an account? <Text style={styles.linkAccent}>Sign up</Text>

@@ -1,4 +1,3 @@
-import { useSignUp } from '@clerk/clerk-expo'
 import { useRouter } from 'expo-router'
 import { useState } from 'react'
 import {
@@ -10,9 +9,9 @@ import {
   TextInput,
   TouchableOpacity,
 } from 'react-native'
+import { supabase } from '../../lib/supabase'
 
 export default function SignUp() {
-  const { signUp, isLoaded } = useSignUp()
   const router = useRouter()
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
@@ -21,18 +20,26 @@ export default function SignUp() {
   const [error, setError] = useState('')
 
   const onSignUp = async () => {
-    if (!isLoaded) return
+    const uname = username.trim().toLowerCase()
+    if (!/^[a-z0-9_]{3,24}$/.test(uname)) {
+      setError('Username must be 3–24 characters: letters, numbers, underscores.')
+      return
+    }
     setLoading(true)
     setError('')
-    try {
-      await signUp.create({ username, emailAddress: email, password })
-      await signUp.prepareEmailAddressVerification({ strategy: 'email_code' })
-      router.push('/(auth)/verify-email')
-    } catch (err: any) {
-      setError(err.errors?.[0]?.message ?? err.message ?? 'Sign up failed')
-    } finally {
-      setLoading(false)
+    const { error: err } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        data: { username: uname },
+      },
+    })
+    setLoading(false)
+    if (err) {
+      setError(err.message ?? 'Sign up failed')
+      return
     }
+    router.push({ pathname: '/(auth)/verify-email', params: { email: email.trim() } })
   }
 
   return (

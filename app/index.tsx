@@ -1,9 +1,9 @@
-import { useAuth } from '@clerk/clerk-expo'
 import { Redirect } from 'expo-router'
 import { ActivityIndicator, View } from 'react-native'
+import { useSession } from '../lib/useSession'
 
 export default function Index() {
-  const { isSignedIn, isLoaded } = useAuth()
+  const { session, isLoaded } = useSession()
 
   if (!isLoaded) {
     return (
@@ -13,5 +13,5 @@ export default function Index() {
     )
   }
 
-  return <Redirect href={isSignedIn ? '/(tabs)/' : '/(auth)/sign-in'} />
+  return <Redirect href={session ? '/(tabs)' : '/(auth)/sign-in'} />
 }
