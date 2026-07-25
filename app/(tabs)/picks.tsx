@@ -4,14 +4,18 @@ import {
   Dimensions,
   Image,
   PanResponder,
+  ScrollView,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native'
-import { useUser } from '@clerk/clerk-expo'
+import * as Haptics from 'expo-haptics'
+import { useUser } from '../../lib/useSession'
 import { useSupabase } from '../../lib/useSupabase'
-import { fetchAllGames } from '../../lib/espn'
+import { fetchAllGames, LEAGUE_SPORT, SPORT_FILTERS } from '../../lib/espn'
+import { computeDayStreak } from '../../lib/points'
 import type { Game } from '../../lib/types'
 
 const SCREEN_W = Dimensions.get('window').width
@@ -20,15 +24,18 @@ const SWIPE_OUT_DURATION = 220
 
 export default function Picks() {
   const supabase = useSupabase()
-  const { user } = useUser()
+  const user = useUser()
   const [games, setGames] = useState<Game[]>([])
-  const [index, setIndex] = useState(0)
   const [pickedIds, setPickedIds] = useState<Set<string>>(new Set())
+  const [pickDates, setPickDates] = useState<string[]>([])
   const [sessionPicks, setSessionPicks] = useState(0)
+  const [sport, setSport] = useState('all')
   const [loading, setLoading] = useState(true)
+  // game_id → how the community picked (null while loading, then counts)
+  const [consensus, setConsensus] = useState<Map<string, { home: number; away: number }>>(new Map())
 
   const pan = useRef(new Animated.ValueXY()).current
-  const swipeAnim = useRef(new Animated.Value(0)).current
+  const animating = useRef(false)
 
   const rotate = pan.x.interpolate({
     inputRange: [-SCREEN_W / 2, 0, SCREEN_W / 2],
@@ -49,27 +56,60 @@ export default function Picks() {
   const loadGames = useCallback(async () => {
     setLoading(true)
     const all = await fetchAllGames()
-    // Only show upcoming/live games that haven't been picked
-    const upcoming = all.filter(g => g.status !== 'final')
+    // Only show upcoming/live games, soonest first so picks stay relevant
+    const upcoming = all
+      .filter(g => g.status !== 'final')
+      .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())
     setGames(upcoming)
     setLoading(false)
   }, [])
 
   const loadPickedIds = useCallback(async () => {
-    const { data } = await supabase.from('picks').select('game_id')
+    const { data } = await supabase
+      .from('picks')
+      .select('game_id, created_at')
+      .eq('user_id', user?.id ?? '')
     setPickedIds(new Set((data ?? []).map((p: any) => p.game_id)))
-  }, [supabase])
+    setPickDates((data ?? []).map((p: any) => p.created_at))
+  }, [supabase, user])
 
   useEffect(() => {
     loadGames()
     loadPickedIds()
   }, [loadGames, loadPickedIds])
 
-  const unpicked = games.filter(g => !pickedIds.has(g.id))
-  const current = unpicked[index]
-  const next = unpicked[index + 1]
+  // Deck is derived: anything not yet picked, in the selected sport.
+  // Removing a card = adding its id to pickedIds, so no index bookkeeping.
+  const deck = games.filter(
+    g => !pickedIds.has(g.id) && (sport === 'all' || LEAGUE_SPORT[g.league] === sport)
+  )
+  const current = deck[0]
+  const next = deck[1]
+  const streak = computeDayStreak(pickDates)
 
-  const savePick = useCallback(async (game: Game, pickedTeam: string) => {
+  // Community consensus for the card on top, fetched once per game
+  useEffect(() => {
+    const id = current?.id
+    if (!id || consensus.has(id)) return
+    let cancelled = false
+    supabase
+      .from('picks')
+      .select('picked_team')
+      .eq('game_id', id)
+      .then(({ data }) => {
+        if (cancelled || !current) return
+        let home = 0
+        let away = 0
+        for (const p of (data ?? []) as any[]) {
+          if (p.picked_team === current.home_team) home++
+          else if (p.picked_team === current.away_team) away++
+        }
+        setConsensus(prev => new Map(prev).set(id, { home, away }))
+      })
+    return () => { cancelled = true }
+  }, [current?.id, consensus, supabase]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const persistPick = useCallback(async (game: Game, pickedTeam: string) => {
     await supabase.from('games').upsert({
       id: game.id,
       league: game.league,
@@ -86,24 +126,33 @@ export default function Picks() {
       { game_id: game.id, user_id: user?.id, picked_team: pickedTeam },
       { onConflict: 'user_id,game_id' }
     )
-    setPickedIds(prev => new Set(prev).add(game.id))
-    setSessionPicks(n => n + 1)
   }, [supabase, user])
 
   const swipeCard = useCallback((direction: 'left' | 'right') => {
-    if (!current) return
+    if (!current || animating.current) return
+    animating.current = true
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {})
+    const game = current
     const toX = direction === 'right' ? SCREEN_W * 1.5 : -SCREEN_W * 1.5
     Animated.timing(pan, {
       toValue: { x: toX, y: 0 },
       duration: SWIPE_OUT_DURATION,
       useNativeDriver: false,
     }).start(() => {
-      savePick(current, direction === 'right' ? current.home_team : current.away_team)
+      // Advance the deck immediately; save in the background
+      setPickedIds(prev => new Set(prev).add(game.id))
+      setPickDates(prev => [...prev, new Date().toISOString()])
+      setSessionPicks(n => n + 1)
       pan.setValue({ x: 0, y: 0 })
-      setIndex(i => i + 1)
+      animating.current = false
+      persistPick(game, direction === 'right' ? game.home_team : game.away_team).catch(() => {})
     })
-  }, [current, pan, savePick])
+  }, [current, pan, persistPick])
 
+  // Single PanResponder reading the latest swipeCard through a ref,
+  // so gesture handlers never capture a stale closure.
+  const swipeCardRef = useRef(swipeCard)
+  swipeCardRef.current = swipeCard
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -112,9 +161,9 @@ export default function Picks() {
       }),
       onPanResponderRelease: (_, gesture) => {
         if (gesture.dx > SWIPE_THRESHOLD) {
-          swipeCard('right')
+          swipeCardRef.current('right')
         } else if (gesture.dx < -SWIPE_THRESHOLD) {
-          swipeCard('left')
+          swipeCardRef.current('left')
         } else {
           Animated.spring(pan, {
             toValue: { x: 0, y: 0 },
@@ -126,29 +175,26 @@ export default function Picks() {
     })
   ).current
 
-  // Rebuild pan responder when swipeCard changes
-  const panResponderRef = useRef(panResponder)
-  useEffect(() => {
-    panResponderRef.current = PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderMove: Animated.event([null, { dx: pan.x, dy: pan.y }], {
-        useNativeDriver: false,
-      }),
-      onPanResponderRelease: (_, gesture) => {
-        if (gesture.dx > SWIPE_THRESHOLD) {
-          swipeCard('right')
-        } else if (gesture.dx < -SWIPE_THRESHOLD) {
-          swipeCard('left')
-        } else {
-          Animated.spring(pan, {
-            toValue: { x: 0, y: 0 },
-            useNativeDriver: false,
-            friction: 5,
-          }).start()
-        }
-      },
-    })
-  }, [swipeCard, pan])
+  const sportChips = (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.chipsRow}
+      style={styles.chipsScroll}
+    >
+      {SPORT_FILTERS.map(f => (
+        <TouchableOpacity
+          key={f.key}
+          style={[styles.chip, sport === f.key && styles.chipActive]}
+          onPress={() => setSport(f.key)}
+        >
+          <Text style={[styles.chipText, sport === f.key && styles.chipTextActive]}>
+            {f.label}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  )
 
   if (loading) {
     return (
@@ -158,29 +204,63 @@ export default function Picks() {
     )
   }
 
+  const headerRow = (
+    <View style={styles.header}>
+      <View style={styles.headerLeft}>
+        <Text style={styles.title}>Picks</Text>
+        <Text style={styles.subtitle}>Swipe to pick a winner</Text>
+      </View>
+      {streak > 0 && (
+        <View style={styles.streakBadge}>
+          <Text style={styles.streakFlame}>🔥</Text>
+          <Text style={styles.streakNum}>{streak}</Text>
+          <Text style={styles.streakLabel}>day{streak !== 1 ? 's' : ''}</Text>
+        </View>
+      )}
+    </View>
+  )
+
+  const challengeFriends = () => {
+    Share.share({
+      message:
+        `I'm on a ${streak}-day pick streak on SportLog 🔥 ` +
+        `Swipe on games, call the winners, and try to beat my score 🏆`,
+    }).catch(() => {})
+  }
+
   if (!current) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.doneIcon}>🏆</Text>
-        <Text style={styles.doneTitle}>You're all caught up!</Text>
-        <Text style={styles.doneSub}>
-          {sessionPicks > 0
-            ? `You made ${sessionPicks} pick${sessionPicks !== 1 ? 's' : ''} this session`
-            : 'No upcoming games to pick right now'}
-        </Text>
-        <TouchableOpacity style={styles.refreshBtn} onPress={() => { setIndex(0); loadGames(); loadPickedIds() }}>
-          <Text style={styles.refreshBtnText}>Refresh</Text>
-        </TouchableOpacity>
+      <View style={styles.container}>
+        {headerRow}
+        {sportChips}
+        <View style={styles.centered}>
+          <Text style={styles.doneIcon}>🏆</Text>
+          <Text style={styles.doneTitle}>You're all caught up!</Text>
+          <Text style={styles.doneSub}>
+            {sessionPicks > 0
+              ? `You made ${sessionPicks} pick${sessionPicks !== 1 ? 's' : ''} this session`
+              : sport !== 'all'
+                ? 'No upcoming games in this sport — try another'
+                : 'No upcoming games to pick right now'}
+          </Text>
+          <TouchableOpacity style={styles.refreshBtn} onPress={() => { loadGames(); loadPickedIds() }}>
+            <Text style={styles.refreshBtnText}>Refresh</Text>
+          </TouchableOpacity>
+          {streak > 0 && (
+            <TouchableOpacity style={styles.challengeBtn} onPress={challengeFriends}>
+              <Text style={styles.challengeBtnText}>Challenge Friends 🔥</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     )
   }
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Picks</Text>
-        <Text style={styles.subtitle}>Swipe to pick a winner</Text>
-      </View>
+      {headerRow}
+
+      {sportChips}
 
       <View style={styles.hint}>
         <Text style={styles.hintLeft}>← Away wins</Text>
@@ -207,7 +287,7 @@ export default function Picks() {
               ],
             },
           ]}
-          {...panResponderRef.current.panHandlers}
+          {...panResponder.panHandlers}
         >
           {/* Home wins overlay */}
           <Animated.View style={[styles.swipeOverlay, styles.homeOverlay, { opacity: homeOpacity }]}>
@@ -219,7 +299,7 @@ export default function Picks() {
             <Text style={styles.overlayLabel}>AWAY WINS</Text>
           </Animated.View>
 
-          <MatchupCardContent game={current} />
+          <MatchupCardContent game={current} consensus={consensus.get(current.id)} />
         </Animated.View>
       </View>
 
@@ -236,14 +316,22 @@ export default function Picks() {
       </View>
 
       <Text style={styles.counter}>
-        {sessionPicks} pick{sessionPicks !== 1 ? 's' : ''} made this session
+        {deck.length} game{deck.length !== 1 ? 's' : ''} left · {sessionPicks} pick{sessionPicks !== 1 ? 's' : ''} this session
       </Text>
     </View>
   )
 }
 
-function MatchupCardContent({ game }: { game: Game }) {
+function MatchupCardContent({
+  game,
+  consensus,
+}: {
+  game: Game
+  consensus?: { home: number; away: number }
+}) {
   const isLive = game.status === 'live'
+  const votes = (consensus?.home ?? 0) + (consensus?.away ?? 0)
+  const awayPct = votes > 0 ? Math.round(((consensus?.away ?? 0) / votes) * 100) : 0
   return (
     <View style={styles.cardInner}>
       <View style={styles.cardLeague}>
@@ -251,30 +339,9 @@ function MatchupCardContent({ game }: { game: Game }) {
         {isLive && <View style={styles.liveDot} />}
       </View>
 
+      {/* Away on the left, home on the right, matching the swipe
+          directions and the buttons below the deck. */}
       <View style={styles.teamsRow}>
-        {/* Home team */}
-        <View style={styles.teamBlock}>
-          {game.home_logo ? (
-            <Image source={{ uri: game.home_logo }} style={styles.logo} resizeMode="contain" />
-          ) : (
-            <View style={styles.logoPlaceholder} />
-          )}
-          <Text style={styles.teamLabel}>{game.home_team}</Text>
-          <Text style={styles.teamRole}>Home</Text>
-        </View>
-
-        <View style={styles.vsDivider}>
-          {isLive ? (
-            <Text style={styles.liveScore}>
-              {game.home_score ?? 0}–{game.away_score ?? 0}
-            </Text>
-          ) : (
-            <Text style={styles.vsLabel}>VS</Text>
-          )}
-          <Text style={styles.gameDate}>{formatDate(game.starts_at)}</Text>
-        </View>
-
-        {/* Away team */}
         <View style={styles.teamBlock}>
           {game.away_logo ? (
             <Image source={{ uri: game.away_logo }} style={styles.logo} resizeMode="contain" />
@@ -284,7 +351,43 @@ function MatchupCardContent({ game }: { game: Game }) {
           <Text style={styles.teamLabel}>{game.away_team}</Text>
           <Text style={styles.teamRole}>Away</Text>
         </View>
+
+        <View style={styles.vsDivider}>
+          {isLive ? (
+            <Text style={styles.liveScore}>
+              {game.away_score ?? 0}–{game.home_score ?? 0}
+            </Text>
+          ) : (
+            <Text style={styles.vsLabel}>@</Text>
+          )}
+          <Text style={styles.gameDate}>{formatDate(game.starts_at)}</Text>
+        </View>
+
+        <View style={styles.teamBlock}>
+          {game.home_logo ? (
+            <Image source={{ uri: game.home_logo }} style={styles.logo} resizeMode="contain" />
+          ) : (
+            <View style={styles.logoPlaceholder} />
+          )}
+          <Text style={styles.teamLabel}>{game.home_team}</Text>
+          <Text style={styles.teamRole}>Home</Text>
+        </View>
       </View>
+
+      {/* Community consensus, shown once at least 3 users have picked */}
+      {votes >= 3 && (
+        <View style={styles.consensusWrap}>
+          <View style={styles.consensusBar}>
+            <View style={[styles.consensusAway, { flex: Math.max(awayPct, 4) }]} />
+            <View style={[styles.consensusHome, { flex: Math.max(100 - awayPct, 4) }]} />
+          </View>
+          <Text style={styles.consensusText}>
+            {awayPct >= 50
+              ? `${awayPct}% of SportLog takes ${game.away_abbr ?? game.away_team}`
+              : `${100 - awayPct}% of SportLog takes ${game.home_abbr ?? game.home_team}`}
+          </Text>
+        </View>
+      )}
     </View>
   )
 }
@@ -313,9 +416,40 @@ const styles = StyleSheet.create({
   refreshBtn: { marginTop: 16, backgroundColor: '#e94560', paddingHorizontal: 28, paddingVertical: 12, borderRadius: 12 },
   refreshBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 
-  header: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 4 },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: 60, paddingHorizontal: 20, paddingBottom: 4,
+  },
+  headerLeft: {},
   title: { fontSize: 30, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
   subtitle: { fontSize: 13, color: '#444', marginTop: 2 },
+  streakBadge: {
+    flexDirection: 'row', alignItems: 'baseline', gap: 3,
+    backgroundColor: '#241d08', borderWidth: 1, borderColor: '#4a3a10',
+    borderRadius: 14, paddingHorizontal: 12, paddingVertical: 7,
+  },
+  streakFlame: { fontSize: 16 },
+  streakNum: { fontSize: 18, fontWeight: '800', color: '#f5a623' },
+  streakLabel: { fontSize: 11, color: '#8a6d1f', fontWeight: '600' },
+  challengeBtn: {
+    marginTop: 8, borderWidth: 1, borderColor: '#e94560',
+    paddingHorizontal: 28, paddingVertical: 12, borderRadius: 12,
+  },
+  challengeBtnText: { color: '#e94560', fontWeight: '700', fontSize: 15 },
+
+  chipsScroll: { flexGrow: 0, marginTop: 12 },
+  chipsRow: { paddingHorizontal: 16, gap: 8 },
+  chip: {
+    backgroundColor: '#111120',
+    borderWidth: 1,
+    borderColor: '#1e1e38',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  chipActive: { backgroundColor: '#e94560', borderColor: '#e94560' },
+  chipText: { fontSize: 13, color: '#888', fontWeight: '600' },
+  chipTextActive: { color: '#fff' },
 
   hint: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 24, marginTop: 10 },
   hintLeft: { fontSize: 12, color: '#3a5aff', fontWeight: '600' },
@@ -368,6 +502,15 @@ const styles = StyleSheet.create({
   logoPlaceholder: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#1e1e38' },
   teamLabel: { fontSize: 13, fontWeight: '700', color: '#fff', textAlign: 'center' },
   teamRole: { fontSize: 11, color: '#444', fontWeight: '500' },
+
+  consensusWrap: { gap: 6 },
+  consensusBar: {
+    flexDirection: 'row', height: 5, borderRadius: 3,
+    overflow: 'hidden', gap: 2,
+  },
+  consensusAway: { backgroundColor: '#3a5aff', borderRadius: 3 },
+  consensusHome: { backgroundColor: '#2ecc71', borderRadius: 3 },
+  consensusText: { fontSize: 11, color: '#555', fontWeight: '600', textAlign: 'center' },
 
   vsDivider: { alignItems: 'center', gap: 6, paddingHorizontal: 8 },
   vsLabel: { fontSize: 20, fontWeight: '900', color: '#2a2a4a' },

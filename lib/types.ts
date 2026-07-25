@@ -27,6 +27,16 @@ export interface Log {
   game: Game
 }
 
+export interface Pick {
+  id: string
+  user_id: string
+  game_id: string
+  picked_team: string
+  result: string | null
+  created_at: string
+  game: Game
+}
+
 export interface RankEntry {
   id: string
   user_id: string

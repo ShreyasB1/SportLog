@@ -14,7 +14,7 @@ import {
 } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
-import { useUser } from '@clerk/clerk-expo'
+import { useUser } from '../lib/useSession'
 import { useSupabase } from '../lib/useSupabase'
 import { fetchAllGames } from '../lib/espn'
 import { INITIAL_SCORE, updateRatings } from '../lib/elo'
@@ -42,7 +42,7 @@ type RankPhase = 'vibe' | 'compare' | 'done'
 
 export default function LogGame() {
   const supabase = useSupabase()
-  const { user } = useUser()
+  const user = useUser()
   const params = useLocalSearchParams<{
     prefillGameId?: string
     prefillHome?: string

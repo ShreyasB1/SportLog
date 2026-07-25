@@ -12,7 +12,7 @@ import {
 } from 'react-native'
 import { router } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
-import { useUser } from '@clerk/clerk-expo'
+import { useUser } from '../../lib/useSession'
 import { useSupabase } from '../../lib/useSupabase'
 import { fetchAllGames, fetchLeagueGames, SPORT_LEAGUES } from '../../lib/espn'
 import type { Game } from '../../lib/types'
@@ -24,7 +24,7 @@ const ALL_CATEGORIES = [
 
 export default function Explore() {
   const supabase = useSupabase()
-  const { user } = useUser()
+  const user = useUser()
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('all')
   const [allGames, setAllGames] = useState<Game[]>([])

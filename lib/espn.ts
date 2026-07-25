@@ -25,6 +25,20 @@ export const SPORT_LEAGUES = [
   { key: 'WCQ AFC',           sport: 'soccer',     league: 'fifa.worldq.afc',         label: '🌍 AFC WCQ' },
 ]
 
+// League key → sport, for sport-level filtering (e.g. Picks deck)
+export const LEAGUE_SPORT: Record<string, string> = Object.fromEntries(
+  SPORT_LEAGUES.map(l => [l.key, l.sport])
+)
+
+export const SPORT_FILTERS = [
+  { key: 'all',        label: 'All' },
+  { key: 'basketball', label: '🏀 Basketball' },
+  { key: 'football',   label: '🏈 Football' },
+  { key: 'baseball',   label: '⚾ Baseball' },
+  { key: 'hockey',     label: '🏒 Hockey' },
+  { key: 'soccer',     label: '⚽ Soccer' },
+]
+
 // ESPN scoreboard supports a date range: ?dates=YYYYMMDD-YYYYMMDD
 // Fetch 7 days back and 14 days ahead so we show recent results + upcoming fixtures.
 function dateRange(): string {

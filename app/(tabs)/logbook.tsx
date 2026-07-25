@@ -2,15 +2,18 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   FlatList,
   RefreshControl,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import { useSupabase } from '../../lib/useSupabase'
-import type { Log } from '../../lib/types'
+import { fetchAllGames } from '../../lib/espn'
+import { buildShareText, computeDayStreak, gradePick, type PickOutcome } from '../../lib/points'
+import type { Game, Log, Pick } from '../../lib/types'
 
 const WATCHED_VIA_LABELS: Record<string, string> = {
   live:       '📺 Live TV',
@@ -22,35 +25,101 @@ const WATCHED_VIA_LABELS: Record<string, string> = {
 
 export default function Logbook() {
   const supabase = useSupabase()
+  const params = useLocalSearchParams<{ tab?: string }>()
+  const [mode,    setMode]    = useState<'diary' | 'picks'>(
+    params.tab === 'picks' ? 'picks' : 'diary'
+  )
+
+  // Keep responding when the tab is re-focused with a new param
+  useEffect(() => {
+    if (params.tab === 'picks') setMode('picks')
+    else if (params.tab === 'diary') setMode('diary')
+  }, [params.tab])
   const [logs,    setLogs]    = useState<Log[]>([])
+  const [picks,   setPicks]   = useState<Pick[]>([])
   const [loading, setLoading] = useState(true)
 
   const fetchLogs = useCallback(async () => {
-    setLoading(true)
     const { data } = await supabase
       .from('logs')
       .select('*, game:games(*)')
       .order('created_at', { ascending: false })
     setLogs((data as Log[]) ?? [])
-    setLoading(false)
   }, [supabase])
 
-  useEffect(() => { fetchLogs() }, [fetchLogs])
+  const fetchPicks = useCallback(async () => {
+    const [{ data }, fresh] = await Promise.all([
+      supabase
+        .from('picks')
+        .select('*, game:games(*)')
+        .order('created_at', { ascending: false }),
+      // Stored game rows go stale once a pick is made; overlay live ESPN data
+      fetchAllGames().catch(() => [] as Game[]),
+    ])
+    const freshById = new Map(fresh.map(g => [g.id, g]))
+    const merged = ((data as Pick[]) ?? []).map(p => {
+      const f = freshById.get(p.game_id)
+      return f ? { ...p, game: { ...p.game, ...f } } : p
+    })
+    setPicks(merged)
 
-  // Compute a short stat line for the header
+    // Persist newly-final scores so stats stay accurate app-wide
+    const newlyFinal = merged.filter(
+      p => p.game?.status === 'final' &&
+        freshById.has(p.game_id) &&
+        ((data as Pick[]) ?? []).find(o => o.id === p.id)?.game?.status !== 'final'
+    )
+    if (newlyFinal.length > 0) {
+      supabase.from('games').upsert(
+        newlyFinal.map(p => ({
+          id: p.game.id,
+          league: p.game.league,
+          home_team: p.game.home_team,
+          away_team: p.game.away_team,
+          starts_at: p.game.starts_at,
+          status: p.game.status,
+          home_score: p.game.home_score,
+          away_score: p.game.away_score,
+          season: p.game.season,
+          updated_at: new Date().toISOString(),
+        }))
+      ).then(() => {}, () => {})
+    }
+  }, [supabase])
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    await Promise.all([fetchLogs(), fetchPicks()])
+    setLoading(false)
+  }, [fetchLogs, fetchPicks])
+
+  useEffect(() => { fetchAll() }, [fetchAll])
+
+  // Header stats
   const leagues = new Set(logs.map(l => l.game?.league).filter(Boolean))
+  const graded = picks.map(gradePick)
+  const wins = graded.filter(o => o === 'correct').length
+  const losses = graded.filter(o => o === 'incorrect').length
+  const accuracy = wins + losses > 0 ? Math.round((wins / (wins + losses)) * 100) : null
+  const streak = computeDayStreak(picks.map(p => p.created_at))
+
+  const shareRecord = () => {
+    Share.share({ message: buildShareText(picks, { streak }) }).catch(() => {})
+  }
+
+  const isDiary = mode === 'diary'
 
   return (
     <View style={styles.container}>
       <FlatList
-        data={logs}
+        data={isDiary ? (logs as (Log | Pick)[]) : (picks as (Log | Pick)[])}
         keyExtractor={item => item.id}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={fetchLogs} tintColor="#e94560" />
+          <RefreshControl refreshing={loading} onRefresh={fetchAll} tintColor="#e94560" />
         }
         contentContainerStyle={[
           styles.list,
-          logs.length === 0 && styles.listEmpty,
+          (isDiary ? logs : picks).length === 0 && styles.listEmpty,
         ]}
         ListHeaderComponent={
           <View style={styles.header}>
@@ -64,33 +133,89 @@ export default function Logbook() {
                 <Text style={styles.addBtnText}>Log Game</Text>
               </TouchableOpacity>
             </View>
-            {logs.length > 0 && (
+
+            {/* Diary | Picks toggle */}
+            <View style={styles.segment}>
+              <TouchableOpacity
+                style={[styles.segmentBtn, isDiary && styles.segmentBtnActive]}
+                onPress={() => setMode('diary')}
+              >
+                <Text style={[styles.segmentText, isDiary && styles.segmentTextActive]}>
+                  Diary
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.segmentBtn, !isDiary && styles.segmentBtnActive]}
+                onPress={() => setMode('picks')}
+              >
+                <Text style={[styles.segmentText, !isDiary && styles.segmentTextActive]}>
+                  Picks
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {isDiary && logs.length > 0 && (
               <View style={styles.statsRow}>
                 <StatChip icon="film-outline" value={`${logs.length}`} label="games" />
                 <StatChip icon="trophy-outline" value={`${leagues.size}`} label="leagues" />
+              </View>
+            )}
+            {!isDiary && picks.length > 0 && (
+              <View style={styles.statsRow}>
+                <StatChip icon="flash-outline" value={`${picks.length}`} label="picks" />
+                <StatChip icon="checkmark-circle-outline" value={`${wins}–${losses}`} label="record" />
+                {accuracy != null && (
+                  <StatChip icon="analytics-outline" value={`${accuracy}%`} label="accuracy" />
+                )}
+                {streak > 1 && (
+                  <StatChip icon="flame-outline" value={`${streak}`} label="day streak" />
+                )}
+                <TouchableOpacity style={styles.shareChip} onPress={shareRecord}>
+                  <Ionicons name="share-outline" size={13} color="#e94560" />
+                  <Text style={styles.shareChipText}>Share</Text>
+                </TouchableOpacity>
               </View>
             )}
           </View>
         }
         ListEmptyComponent={
           !loading ? (
-            <View style={styles.empty}>
-              <View style={styles.emptyIconWrap}>
-                <Text style={styles.emptyIcon}>🏟️</Text>
+            isDiary ? (
+              <View style={styles.empty}>
+                <View style={styles.emptyIconWrap}>
+                  <Text style={styles.emptyIcon}>🏟️</Text>
+                </View>
+                <Text style={styles.emptyTitle}>No games logged yet</Text>
+                <Text style={styles.emptySub}>Start building your sports diary</Text>
+                <TouchableOpacity
+                  style={styles.emptyBtn}
+                  onPress={() => router.push('/log-game')}
+                >
+                  <Ionicons name="add" size={16} color="#fff" />
+                  <Text style={styles.emptyBtnText}>Log Your First Game</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={styles.emptyTitle}>No games logged yet</Text>
-              <Text style={styles.emptySub}>Start building your sports diary</Text>
-              <TouchableOpacity
-                style={styles.emptyBtn}
-                onPress={() => router.push('/log-game')}
-              >
-                <Ionicons name="add" size={16} color="#fff" />
-                <Text style={styles.emptyBtnText}>Log Your First Game</Text>
-              </TouchableOpacity>
-            </View>
+            ) : (
+              <View style={styles.empty}>
+                <View style={styles.emptyIconWrap}>
+                  <Text style={styles.emptyIcon}>⚡</Text>
+                </View>
+                <Text style={styles.emptyTitle}>No picks yet</Text>
+                <Text style={styles.emptySub}>Swipe on matchups in the Picks tab</Text>
+                <TouchableOpacity
+                  style={styles.emptyBtn}
+                  onPress={() => router.push('/(tabs)/picks')}
+                >
+                  <Ionicons name="flash" size={16} color="#fff" />
+                  <Text style={styles.emptyBtnText}>Make Your First Pick</Text>
+                </TouchableOpacity>
+              </View>
+            )
           ) : null
         }
-        renderItem={({ item }) => <LogCard log={item} />}
+        renderItem={({ item }) =>
+          isDiary ? <LogCard log={item as Log} /> : <PickCard pick={item as Pick} />
+        }
       />
     </View>
   )
@@ -102,6 +227,56 @@ function StatChip({ icon, value, label }: { icon: any; value: string; label: str
       <Ionicons name={icon} size={13} color="#555" />
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  )
+}
+
+const OUTCOME_META: Record<PickOutcome, { label: string; color: string; bg: string }> = {
+  correct:   { label: '✓ Correct',   color: '#2ecc71', bg: '#0d2a1a' },
+  incorrect: { label: '✗ Missed',    color: '#e94560', bg: '#2a0e1a' },
+  draw:      { label: '— Draw',      color: '#888',    bg: '#1e1e38' },
+  pending:   { label: '⏳ Pending',  color: '#c9a227', bg: '#241d08' },
+}
+
+function PickCard({ pick }: { pick: Pick }) {
+  const g = pick.game
+  const outcome = gradePick(pick)
+  const meta = OUTCOME_META[outcome]
+  const isFinal = g?.status === 'final' && g.home_score != null
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardTopRow}>
+        <View style={styles.leaguePill}>
+          <Text style={styles.leaguePillText}>{g?.league}</Text>
+        </View>
+        <View style={[styles.outcomeBadge, { backgroundColor: meta.bg }]}>
+          <Text style={[styles.outcomeText, { color: meta.color }]}>{meta.label}</Text>
+        </View>
+      </View>
+
+      <Text style={styles.matchup}>{g?.home_team} vs {g?.away_team}</Text>
+
+      {isFinal ? (
+        <Text style={styles.finalScore}>Final · {g.home_score} – {g.away_score}</Text>
+      ) : (
+        <Text style={styles.finalScore}>
+          {g?.status === 'live' ? 'Live now' : g ? new Date(g.starts_at).toLocaleDateString('en-US', {
+            weekday: 'short', month: 'short', day: 'numeric',
+          }) : ''}
+        </Text>
+      )}
+
+      <View style={styles.cardFooter}>
+        <Text style={styles.pickedLine}>
+          Your pick: <Text style={styles.pickedTeam}>{pick.picked_team}</Text>
+        </Text>
+        <Text style={styles.dateText}>
+          {new Date(pick.created_at).toLocaleDateString('en-US', {
+            month: 'short', day: 'numeric',
+          })}
+        </Text>
+      </View>
     </View>
   )
 }
@@ -178,7 +353,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 8,
   },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  statsRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+
+  segment: {
+    flexDirection: 'row', backgroundColor: '#111120',
+    borderRadius: 12, borderWidth: 1, borderColor: '#1e1e38',
+    padding: 3, marginBottom: 12,
+  },
+  segmentBtn: {
+    flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 9,
+  },
+  segmentBtnActive: { backgroundColor: '#e94560' },
+  segmentText: { fontSize: 13, fontWeight: '700', color: '#666' },
+  segmentTextActive: { color: '#fff' },
+
+  statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  shareChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: '#2a0e1a', borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderWidth: 1, borderColor: '#e94560',
+  },
+  shareChipText: { fontSize: 12, fontWeight: '700', color: '#e94560' },
   statChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     backgroundColor: '#111120', borderRadius: 10,
@@ -224,6 +419,13 @@ const styles = StyleSheet.create({
     borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3,
   },
   spoilerText: { fontSize: 10, color: '#e94560', fontWeight: '600' },
+
+  outcomeBadge: {
+    borderRadius: 8, paddingHorizontal: 9, paddingVertical: 4,
+  },
+  outcomeText: { fontSize: 11, fontWeight: '800' },
+  pickedLine: { fontSize: 13, color: '#666' },
+  pickedTeam: { color: '#fff', fontWeight: '700' },
 
   // Empty state
   empty: {

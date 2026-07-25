@@ -1,13 +1,13 @@
-import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import { Redirect, Tabs, router } from 'expo-router'
 import { TouchableOpacity, View } from 'react-native'
+import { useSession } from '../../lib/useSession'
 
 export default function TabsLayout() {
-  const { isSignedIn, isLoaded } = useAuth()
+  const { session, isLoaded } = useSession()
 
   if (!isLoaded) return null
-  if (!isSignedIn) return <Redirect href="/(auth)/sign-in" />
+  if (!session) return <Redirect href="/(auth)/sign-in" />
 
   return (
     <Tabs
