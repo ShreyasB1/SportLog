@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
 import {
+  Alert,
   FlatList,
   Image,
   StyleSheet,
@@ -11,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons'
 import { useUser } from '../lib/useSession'
 import { useSupabase } from '../lib/useSupabase'
+import { removeFollower, unfollowUser } from '../lib/social'
 import type { Profile } from '../lib/types'
 
 export default function Follows() {
@@ -56,6 +58,46 @@ export default function Follows() {
   }, [supabase, me])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  const confirmRemoveFollower = (person: Profile) => {
+    if (!me) return
+    Alert.alert(
+      'Remove follower?',
+      `@${person.username} will no longer be able to see your logbook. They are not notified, and can follow you again unless you block them.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await removeFollower(supabase, me.id, person.id)
+            if (error) return Alert.alert('Error', error)
+            setFollowers(prev => prev.filter(p => p.id !== person.id))
+          },
+        },
+      ],
+    )
+  }
+
+  const confirmUnfollow = (person: Profile) => {
+    if (!me) return
+    Alert.alert(
+      `Unfollow @${person.username}?`,
+      'You will stop seeing their logbook.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unfollow',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await unfollowUser(supabase, me.id, person.id)
+            if (error) return Alert.alert('Error', error)
+            setFollowing(prev => prev.filter(p => p.id !== person.id))
+          },
+        },
+      ],
+    )
+  }
 
   const data = tab === 'followers' ? followers : following
 
@@ -132,7 +174,19 @@ export default function Follows() {
                 <Text style={styles.rowName} numberOfLines={1}>{name}</Text>
                 <Text style={styles.rowUsername} numberOfLines={1}>@{item.username}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={16} color="#3a3a5a" />
+              <TouchableOpacity
+                style={styles.rowAction}
+                onPress={() =>
+                  tab === 'followers'
+                    ? confirmRemoveFollower(item)
+                    : confirmUnfollow(item)
+                }
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.rowActionText}>
+                  {tab === 'followers' ? 'Remove' : 'Unfollow'}
+                </Text>
+              </TouchableOpacity>
             </TouchableOpacity>
           )
         }}
@@ -179,4 +233,9 @@ const styles = StyleSheet.create({
   rowInfo: { flex: 1 },
   rowName: { color: '#fff', fontSize: 15, fontWeight: '700' },
   rowUsername: { color: '#555', fontSize: 13, marginTop: 1 },
+  rowAction: {
+    borderWidth: 1, borderColor: '#2a2a45', borderRadius: 9,
+    paddingHorizontal: 12, paddingVertical: 6,
+  },
+  rowActionText: { color: '#999', fontSize: 12, fontWeight: '700' },
 })

@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { useUser } from '../lib/useSession'
 import { useSupabase } from '../lib/useSupabase'
 import { computePickRecord, type PickRecord } from '../lib/points'
+import { fetchMutedIds } from '../lib/social'
 import type { Profile } from '../lib/types'
 
 interface Entry {
@@ -43,7 +44,10 @@ export default function Leaderboard() {
     for (const f of (friendRows ?? []) as any[]) {
       friendIds.add(f.requester_id === me.id ? f.addressee_id : f.requester_id)
     }
-    const ids = [me.id, ...friendIds]
+    // Blocked accounts are already gone -- blocking deletes the edges and RLS
+    // hides the rows. Mutes are private, so they are filtered here.
+    const mutedIds = await fetchMutedIds(supabase, me.id)
+    const ids = [me.id, ...[...friendIds].filter(fid => !mutedIds.has(fid))]
 
     const [profilesRes, picksRes] = await Promise.all([
       supabase.from('profiles').select('*').in('id', ids),

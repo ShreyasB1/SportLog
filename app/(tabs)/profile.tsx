@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { useUser } from '../../lib/useSession'
 import { useSupabase } from '../../lib/useSupabase'
 import { computePickRecord } from '../../lib/points'
+import { fetchMutedIds } from '../../lib/social'
 import type { Log, Profile } from '../../lib/types'
 
 export default function ProfileScreen() {
@@ -136,7 +137,11 @@ export default function ProfileScreen() {
     setRecentLogs((recentRes.data as Log[]) ?? [])
     setFollowersCount(followersRes.count ?? 0)
     setFollowingCount(followingRes.count ?? 0)
-    setSuggested((suggestedRes.data as Profile[]) ?? [])
+    // Blocked accounts are hidden by RLS; mutes are private so filter here.
+    const mutedIds = await fetchMutedIds(supabase, userId)
+    setSuggested(
+      ((suggestedRes.data as Profile[]) ?? []).filter(p => !mutedIds.has(p.id))
+    )
 
     const followingIds = new Set(
       ((followingListRes.data ?? []) as any[]).map(f => f.addressee_id)
@@ -534,6 +539,14 @@ export default function ProfileScreen() {
         }}
         ListFooterComponent={
           <View>
+            <TouchableOpacity
+              style={styles.settingsRow}
+              onPress={() => router.push('/blocked')}
+            >
+              <Ionicons name="ban-outline" size={17} color="#888" />
+              <Text style={styles.settingsRowText}>Blocked & muted accounts</Text>
+              <Ionicons name="chevron-forward" size={16} color="#3a3a5a" />
+            </TouchableOpacity>
             <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
               <Text style={styles.signOutText}>Sign Out</Text>
             </TouchableOpacity>
@@ -799,6 +812,20 @@ const styles = StyleSheet.create({
   recentReaction: { fontSize: 22, marginLeft: 8 },
   noRecent: { paddingHorizontal: 20, paddingTop: 8 },
   noRecentText: { color: '#333', fontSize: 14, textAlign: 'center' },
+  settingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 28,
+    backgroundColor: '#111120',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#1e1e38',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+  },
+  settingsRowText: { flex: 1, color: '#ddd', fontSize: 14, fontWeight: '600' },
   signOutBtn: {
     marginHorizontal: 16,
     marginTop: 28,
