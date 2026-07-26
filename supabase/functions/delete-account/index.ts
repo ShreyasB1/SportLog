@@ -31,7 +31,39 @@ Deno.serve(async (req) => {
     })
   }
 
-  const { error: delErr } = await admin.auth.admin.deleteUser(userData.user.id)
+  const userId = userData.user.id
+
+  // Purge avatars before deleting the account. The objects live in a public
+  // bucket under "<user_id>/", so a leftover file stays fetchable by URL even
+  // though its profile row is gone. Migration 0008 also clears the
+  // storage.objects rows as a backstop, but only remove() reclaims the
+  // underlying file rather than orphaning it in the storage backend.
+  //
+  // Best-effort: a failure here must not block account deletion, which Apple
+  // requires to work (App Store guideline 5.1.1(v)).
+  // Uploads are timestamped ("avatar-<ts>.jpg") and never overwrite, so a user
+  // accumulates one object per photo change. list() caps at 100 per call --
+  // page through until the folder is empty rather than stranding the rest.
+  try {
+    for (let page = 0; page < 50; page++) {
+      const { data: files, error: listErr } = await admin.storage
+        .from('avatars')
+        .list(userId, { limit: 100 })
+      if (listErr) throw listErr
+      if (!files || files.length === 0) break
+
+      const { error: rmErr } = await admin.storage
+        .from('avatars')
+        .remove(files.map((f) => `${userId}/${f.name}`))
+      if (rmErr) throw rmErr
+
+      if (files.length < 100) break
+    }
+  } catch (err) {
+    console.error('avatar cleanup failed for', userId, err)
+  }
+
+  const { error: delErr } = await admin.auth.admin.deleteUser(userId)
   if (delErr) {
     return new Response(JSON.stringify({ error: 'Deletion failed' }), {
       status: 500,

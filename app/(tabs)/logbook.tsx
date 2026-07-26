@@ -11,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSupabase } from '../../lib/useSupabase'
+import { useUser } from '../../lib/useSession'
 import { fetchAllGames } from '../../lib/espn'
 import { buildShareText, computeDayStreak, gradePick, type PickOutcome } from '../../lib/points'
 import type { Game, Log, Pick } from '../../lib/types'
@@ -25,6 +26,7 @@ const WATCHED_VIA_LABELS: Record<string, string> = {
 
 export default function Logbook() {
   const supabase = useSupabase()
+  const user = useUser()
   const params = useLocalSearchParams<{ tab?: string }>()
   const [mode,    setMode]    = useState<'diary' | 'picks'>(
     params.tab === 'picks' ? 'picks' : 'diary'
@@ -39,19 +41,26 @@ export default function Logbook() {
   const [picks,   setPicks]   = useState<Pick[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Both queries filter on user_id explicitly. RLS alone is not enough here:
+  // logs are readable for anyone you follow, and picks are readable app-wide,
+  // so an unfiltered select returns other people's rows into your own logbook.
   const fetchLogs = useCallback(async () => {
+    if (!user) return
     const { data } = await supabase
       .from('logs')
       .select('*, game:games(*)')
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false })
     setLogs((data as Log[]) ?? [])
-  }, [supabase])
+  }, [supabase, user])
 
   const fetchPicks = useCallback(async () => {
+    if (!user) return
     const [{ data }, fresh] = await Promise.all([
       supabase
         .from('picks')
         .select('*, game:games(*)')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false }),
       // Stored game rows go stale once a pick is made; overlay live ESPN data
       fetchAllGames().catch(() => [] as Game[]),
@@ -85,7 +94,7 @@ export default function Logbook() {
         }))
       ).then(() => {}, () => {})
     }
-  }, [supabase])
+  }, [supabase, user])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
