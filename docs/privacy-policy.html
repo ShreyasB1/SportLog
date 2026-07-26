@@ -40,7 +40,7 @@
     <li><strong>Account information:</strong> your email address, used to create and secure your account and to send verification and password-reset emails. Your password is handled by our authentication provider and stored only in hashed form.</li>
     <li><strong>Profile information:</strong> your username, display name, optional bio, optional favorite team, and an optional profile photo you choose to upload.</li>
     <li><strong>Content you create:</strong> game logs, reviews, reactions, "watched via" details, spoiler settings, predictions ("picks"), and your watchlist.</li>
-    <li><strong>Social connections:</strong> the accounts you follow and who follows you.</li>
+    <li><strong>Social connections:</strong> the accounts you follow, who follows you, and any accounts you have blocked or muted. Your block and mute lists are private and are never shown to the accounts on them.</li>
     <li><strong>Technical information:</strong> our backend provider may automatically log limited technical data such as IP address and request logs for security and to operate the service. Authentication tokens are stored securely on your device.</li>
   </ul>
   <p>We do not collect precise location, contacts, or device advertising identifiers.</p>
@@ -56,14 +56,30 @@
 
   <h2>3. What Others Can See</h2>
   <ul>
-    <li><strong>Public to other users:</strong> your username, display name, bio, favorite team, your individual picks, and your prediction record are visible to anyone signed in to SportLog.</li>
+    <li><strong>Public to other users:</strong> your username, display name, bio, favorite team, your individual picks, and your prediction record are visible to anyone signed in to SportLog, except accounts you have blocked.</li>
     <li><strong>Public on the internet:</strong> profile photos are served from public storage, so anyone holding a photo's direct link can view it, whether or not they use SportLog. Note that changing your photo uploads a new image and does not remove earlier ones.</li>
     <li><strong>Your followers:</strong> your game logbook (your logged games and reviews) is visible to accounts that follow you. Following does <strong>not</strong> require your approval &mdash; any SportLog user can choose to follow you and will then be able to see your logbook.</li>
-    <li>SportLog does not currently offer a way to remove a follower or to make your logbook private. A follower keeps access until they choose to unfollow you, or until you delete the entry or your account. If you would rather an entry not be seen, do not log it.</li>
     <li>You control what you post and can edit or delete your content at any time.</li>
   </ul>
 
-  <h2>4. Third-Party Services</h2>
+  <h2>4. Controlling Who Sees You</h2>
+  <p>
+    Because following does not require approval, SportLog gives you three ways to
+    take access back. None of them notify the other person.
+  </p>
+  <ul>
+    <li><strong>Remove a follower</strong> (Friends &rarr; Followers, or their profile): they immediately lose access to your logbook. They can follow you again unless you also block them.</li>
+    <li><strong>Block</strong> (their profile &rarr; &hellip;): any follow between you is removed in both directions, neither of you can follow the other, and you disappear from each other across SportLog &mdash; profiles, search, leaderboards, and pick totals. Manage your list under Profile &rarr; Blocked &amp; muted accounts.</li>
+    <li><strong>Mute</strong> (their profile &rarr; &hellip;): hides someone from your leaderboard and suggestions. This one is only about your own view &mdash; a muted account still follows you and can still see your logbook. Mute them <em>and</em> remove them as a follower if you want both.</li>
+  </ul>
+  <p>
+    Blocking and removing a follower are enforced on our servers, not merely
+    hidden in the app. There is currently no setting that makes your logbook
+    private to everyone; if you would rather an entry not be seen by any
+    follower, delete it or do not log it.
+  </p>
+
+  <h2>5. Third-Party Services</h2>
   <p>SportLog relies on a small number of service providers to function:</p>
   <ul>
     <li><strong>Supabase</strong> — hosts our database, authentication, and file storage (including profile photos). Your account and content are stored on Supabase infrastructure. See <a href="https://supabase.com/privacy">Supabase's Privacy Policy</a>.</li>
@@ -71,16 +87,17 @@
     <li><strong>Apple</strong> — distributes the app and processes any transactions through the App Store under Apple's own privacy terms.</li>
   </ul>
 
-  <h2>5. Data Retention and Deletion</h2>
+  <h2>6. Data Retention and Deletion</h2>
   <p>
     We keep your information for as long as your account is active. You can permanently
     delete your account and associated data at any time from within the app
     (Profile &rarr; account settings). You may also request deletion by emailing us at the
     address below. Deleting your account removes your profile, profile photos, logs, picks,
-    watchlist, and social connections from our active systems.
+    watchlist, and social connections &mdash; including your block and mute lists &mdash;
+    from our active systems.
   </p>
 
-  <h2>6. Data Security</h2>
+  <h2>7. Data Security</h2>
   <p>
     We use industry-standard measures to protect your data, including encrypted connections
     (HTTPS), hashed passwords, secure on-device token storage, and database access controls
@@ -89,14 +106,14 @@
     information.
   </p>
 
-  <h2>7. Children's Privacy</h2>
+  <h2>8. Children's Privacy</h2>
   <p>
     SportLog is not directed to children under 13, and we do not knowingly collect personal
     information from children under 13. If you believe a child has provided us information,
     please contact us and we will delete it.
   </p>
 
-  <h2>8. Your Rights</h2>
+  <h2>9. Your Rights</h2>
   <p>
     Depending on where you live, you may have rights to access, correct, export, or delete
     your personal information. You can exercise most of these directly in the app, or by
@@ -104,14 +121,14 @@
     (including the GDPR and CCPA where they apply).
   </p>
 
-  <h2>9. Changes to This Policy</h2>
+  <h2>10. Changes to This Policy</h2>
   <p>
     We may update this Privacy Policy from time to time. When we do, we will revise the
     "Last updated" date above and, where appropriate, notify you in the app. Continued use
     of SportLog after changes take effect constitutes acceptance of the updated policy.
   </p>
 
-  <h2>10. Contact Us</h2>
+  <h2>11. Contact Us</h2>
   <p>
     If you have questions about this Privacy Policy or your data, contact us at:<br />
     <a href="mailto:shreyas.bala1@gmail.com">shreyas.bala1@gmail.com</a>
