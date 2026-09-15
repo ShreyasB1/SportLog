@@ -2,6 +2,8 @@
 
 A sports ranking app: log games you've watched, rank them against each other with pairwise comparisons, follow friends, and get spoiler-free "should I watch this?" recommendations.
 
+Chalk - Sports App (on the app store)
+
 ## Features
 
 - **Logbook** — record every game you watch with a reaction, free-text review, how you watched it, and a spoiler-free toggle
